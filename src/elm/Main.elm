@@ -380,7 +380,7 @@ offWhite =
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = "SVG Text Editing Example"
+    { title = "SVG Drawing Example"
     , body =
         [ Css.Global.global Style.global |> HS.toUnstyled
         , body model

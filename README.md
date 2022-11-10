@@ -1,3 +1,3 @@
-# elm-input-spike
+# svg-clean
 
-Figuring out what input method works best for text editing in Elm.
+Nice setup for working with SVG in Elm.

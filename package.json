@@ -1,7 +1,7 @@
 {
   "name": "elm-input-spike",
   "version": "0.0.1",
-  "description": "Text editing input in Elm.",
+  "description": "SVG drawing in Elm.",
   "scripts": {
     "start": "webpack-dev-server --hot --watch",
     "prebuild": "rimraf dist",
