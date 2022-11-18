@@ -1,15 +1,16 @@
 module Main exposing (Model, Msg, main)
 
+import Animator exposing (Timeline)
 import Array
-import BoundingBox2d exposing (BoundingBox2d)
+import BoundingBox2d
 import Browser
 import Browser.Dom exposing (Viewport)
 import Browser.Events
-import Camera2d exposing (Camera2d)
+import Camera2d exposing (Camera2d, ZoomSpace)
 import Circle2d
 import Color
 import Css.Global
-import Geometry exposing (BScene, BScreen, RScreen, Scene, Screen, VScreen)
+import Geometry exposing (BScene, BScreen, Scene, Screen, VScreen)
 import Geometry.Svg
 import GestureEvent exposing (GestureAction(..), GestureEvent(..))
 import Html as H exposing (Html)
@@ -20,12 +21,14 @@ import Json.Encode as Encode
 import Params
 import Pixels exposing (Pixels)
 import Point2d
+import Point3d
 import Pointer
 import Ports
 import Quantity exposing (Unitless)
 import Rectangle2d
 import Style
 import Task
+import Time exposing (Posix)
 import Tuple2
 import TypedSvg as Svg
 import TypedSvg.Attributes as SvgAttr
@@ -103,7 +106,14 @@ type alias DrawingModel =
     , gestureCondition : GestureCondition
     , camera : Camera2d Unitless Pixels Scene
     , testBox : BScene
+    , zoomAnimation : Timeline ZoomState
     }
+
+
+type ZoomState
+    = ZoomInactive
+    | ZoomStart (Point3d.Point3d Unitless (ZoomSpace Pixels Scene))
+    | ZoomTarget (Point3d.Point3d Unitless (ZoomSpace Pixels Scene))
 
 
 type GestureCondition
@@ -120,6 +130,7 @@ type Msg
     | OnGestureTap (Pointer.PointArgs Screen) GestureEvent
     | OnGestureDoubleTap (Pointer.PointArgs Screen) GestureEvent
     | OnGestureZoom (Pointer.ScaleArgs Screen) GestureEvent
+    | Tick Posix
 
 
 init : () -> ( Model, Cmd Msg )
@@ -134,7 +145,7 @@ subscriptions model =
     [ Browser.Events.onResize coordsToSize |> Sub.map WindowSize
     , case model of
         Ready drawing ->
-            Pointer.subscriptions
+            [ Pointer.subscriptions
                 { onPointerDown = Ports.onPointerDown
                 , onPointerUp = Ports.onPointerUp
                 , onPointerMove = Ports.onPointerMove
@@ -142,6 +153,14 @@ subscriptions model =
                 }
                 drawing.gestures
                 (GestureEvent.gestureDecoder config.containerElementId)
+            , case Animator.current drawing.zoomAnimation of
+                ZoomInactive ->
+                    Sub.none
+
+                _ ->
+                    Animator.toSubscription Tick drawing animator
+            ]
+                |> Sub.batch
 
         _ ->
             Sub.none
@@ -161,6 +180,18 @@ coordsToSize x y =
 viewportToSize : Viewport -> VScreen
 viewportToSize vport =
     Vector2d.pixels vport.viewport.width vport.viewport.height
+
+
+
+-- Animation of the Drawing.
+
+
+animator : Animator.Animator DrawingModel
+animator =
+    Animator.animator
+        |> Animator.watching
+            .zoomAnimation
+            (\x m -> { m | zoomAnimation = x })
 
 
 
@@ -230,6 +261,7 @@ update msg model =
                             , maxX = 40.0 |> Quantity.float
                             , maxY = 25.0 |> Quantity.float
                             }
+                    , zoomAnimation = Animator.init ZoomInactive
                     }
                 )
 
@@ -281,11 +313,16 @@ updateReady msg drawing =
 
         ( _, OnGestureDoubleTap _ (ItemWithId "testBox" ActionSelect _ _) ) ->
             U2.pure drawing
-                |> U2.andThen zoomTarget
+                |> U2.andThen animateZoomToTarget
 
         ( _, OnGestureDragEnd _ _ ) ->
             U2.pure drawing
                 |> U2.andThen resetGestureCondition
+
+        ( _, Tick newTime ) ->
+            Animator.update (Debug.log "Tick" newTime) animator drawing
+                |> U2.pure
+                |> U2.andThen animateCamera
 
         _ ->
             U2.pure drawing
@@ -341,8 +378,8 @@ resetGestureCondition model =
         |> U2.pure
 
 
-zoomTarget : DrawingModel -> ( DrawingModel, Cmd Msg )
-zoomTarget model =
+animateZoomToTarget : DrawingModel -> ( DrawingModel, Cmd Msg )
+animateZoomToTarget model =
     let
         origin =
             Camera2d.origin model.camera
@@ -373,16 +410,60 @@ zoomTarget model =
         zoom =
             Quantity.rate smallestFrameDim largestTargetDim
 
-        newCam =
+        targetCamera =
             model.camera
                 |> Camera2d.translateBy translation
                 |> Camera2d.setZoom zoom
+
+        -- Derive the camera start and end positions in ZoomSpace.
+        startZoomSpace =
+            Camera2d.toZoomSpace model.camera
+                |> ZoomStart
+
+        targetZoomSpace =
+            Camera2d.toZoomSpace targetCamera
+                |> ZoomTarget
     in
     { model
-        | camera = newCam
-        , zoom = Quantity.unwrap zoom
+        | zoomAnimation =
+            Animator.init startZoomSpace
+                |> Animator.go Animator.quickly targetZoomSpace
     }
         |> U2.pure
+
+
+animateCamera : DrawingModel -> ( DrawingModel, Cmd Msg )
+animateCamera model =
+    let
+        newZoomSpace =
+            Animator.xyz model.zoomAnimation
+                (\state ->
+                    case state of
+                        ZoomInactive ->
+                            Point3d.origin |> Point3d.toUnitless |> xyzToMovement
+
+                        ZoomStart zs ->
+                            zs |> Point3d.toUnitless |> xyzToMovement
+
+                        ZoomTarget zs ->
+                            zs |> Point3d.toUnitless |> xyzToMovement
+                )
+                |> Point3d.fromUnitless
+    in
+    case Animator.arrived model.zoomAnimation of
+        ZoomStart _ ->
+            U2.pure { model | camera = Camera2d.fromZoomSpace newZoomSpace }
+
+        _ ->
+            U2.pure { model | zoomAnimation = Animator.init ZoomInactive }
+
+
+xyzToMovement : { x : Float, y : Float, z : Float } -> { x : Animator.Movement, y : Animator.Movement, z : Animator.Movement }
+xyzToMovement xyz =
+    { x = Animator.at xyz.x
+    , y = Animator.at xyz.y
+    , z = Animator.at xyz.z
+    }
 
 
 
