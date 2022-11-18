@@ -320,7 +320,7 @@ updateReady msg drawing =
                 |> U2.andThen resetGestureCondition
 
         ( _, Tick newTime ) ->
-            Animator.update (Debug.log "Tick" newTime) animator drawing
+            Animator.update newTime animator drawing
                 |> U2.pure
                 |> U2.andThen animateCamera
 
@@ -435,7 +435,7 @@ animateZoomToTarget model =
 animateCamera : DrawingModel -> ( DrawingModel, Cmd Msg )
 animateCamera model =
     let
-        newZoomSpace =
+        zoomSpace =
             Animator.xyz model.zoomAnimation
                 (\state ->
                     case state of
@@ -449,10 +449,22 @@ animateCamera model =
                             zs |> Point3d.toUnitless |> xyzToMovement
                 )
                 |> Point3d.fromUnitless
+                |> Debug.log "zoomSpace"
+
+        camera =
+            Camera2d.fromZoomSpace zoomSpace |> Debug.log "camera"
+
+        zoom =
+            Quantity.at_ (Quantity.unsafe 1.0) (Camera2d.zoom camera)
+                |> Quantity.toFloat
     in
     case Animator.arrived model.zoomAnimation of
         ZoomStart _ ->
-            U2.pure { model | camera = Camera2d.fromZoomSpace newZoomSpace }
+            U2.pure
+                { model
+                    | camera = camera
+                    , zoom = zoom
+                }
 
         _ ->
             U2.pure { model | zoomAnimation = Animator.init ZoomInactive }

@@ -120,7 +120,7 @@ fromZoomSpace zoomSpacePoint =
                 |> Point3d.coordinates
 
         zoomLevel =
-            Quantity.at_ (Quantity.unsafe 1.0) z
+            Quantity.at_ (Quantity.unwrap z |> Quantity.unsafe) (Quantity.unsafe 1.0)
     in
     zoomedAt (Point2d.xy x y) zoomLevel
 
@@ -135,7 +135,7 @@ toZoomSpace (Camera2d { sceneFrame, zoomLevel }) =
                 |> Point2d.coordinates
 
         z =
-            Quantity.at_ zoomLevel (Quantity.unsafe 1.0)
+            Quantity.at_ (Quantity.unwrap zoomLevel |> Quantity.unsafe) (Quantity.unsafe 1.0)
     in
     Point3d.xyz x y z
 
