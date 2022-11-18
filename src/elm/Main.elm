@@ -6,6 +6,7 @@ import Browser
 import Browser.Dom exposing (Viewport)
 import Browser.Events
 import Camera2d exposing (Camera2d)
+import Circle2d
 import Color
 import Css.Global
 import Geometry exposing (BScene, BScreen, RScreen, Scene, Screen, VScreen)
@@ -278,6 +279,10 @@ updateReady msg drawing =
                 |> U2.andThen (moveCamera args cameraStart)
 
         ( _, OnGestureDoubleTap _ (ItemWithId "testBox" ActionSelect _ _) ) ->
+            let
+                _ =
+                    Debug.log "updateReady" "zoom to target"
+            in
             U2.pure drawing
 
         ( _, OnGestureDragEnd _ _ ) ->
@@ -528,14 +533,46 @@ background { frame } =
 testBox : DrawingModel -> Svg msg
 testBox model =
     let
-        rect =
-            Geometry.bboxToRect model.testBox
+        scaleFactor =
+            Quantity.per (Quantity.float 1) (Quantity.float 2)
     in
-    Geometry.Svg.rectangle2d
+    Svg.g
         [ HA.property "data-drawing-id" (Encode.string "testBox")
         , HA.property "data-drawing-action" (Encode.string "select")
-        , Color.rgb255 120 190 120 |> Paint |> SvgAttr.fill
+        , Color.rgb255 40 40 40 |> Paint |> SvgAttr.fill
         , Opacity 1.0 |> SvgAttr.fillOpacity
         , InPx.strokeWidth 0
         ]
-        rect
+        [ Svg.path
+            [ SvgAttr.d """M250.803-1C112.311-1-1,111.472-1,250.803s113.311,251.803,251.803,251.803s251.803-113.311,251.803-251.803
+                                  S389.295-1,250.803-1z M250.803,485.82c-129.259,0-235.016-105.757-235.016-235.016S121.544,15.787,250.803,15.787
+                                  S485.82,121.544,485.82,250.803S380.062,485.82,250.803,485.82z"""
+            ]
+            []
+        , Circle2d.atPoint (Point2d.unitless 251 251) (Quantity.float 236)
+            |> Geometry.Svg.circle2d
+                [ Color.rgb255 140 140 140 |> Paint |> SvgAttr.fill
+                , Opacity 0.5 |> SvgAttr.fillOpacity
+                ]
+        , Svg.path
+            [ SvgAttr.d """M250.803,32.574c-120.026,0-218.229,98.203-218.229,218.229c0,120.866,98.203,218.23,218.229,218.23
+                           s218.23-97.364,218.23-218.23C469.033,130.777,370.829,32.574,250.803,32.574z M452.057,242.41h-66.119v-57.915
+                           c0-37.771-31.056-67.987-67.987-67.987h-58.754V49.55C363.351,53.875,447.731,138.255,452.057,242.41z M334.738,259.197h34.413
+                           v58.754c0,28.538-23.502,51.2-51.2,51.2h-58.754v-34.413c0-5.036-3.357-8.393-8.393-8.393s-8.393,3.357-8.393,8.393v34.413
+                           h-57.915c-28.538,0-51.2-23.502-51.2-51.2v-58.754h33.574c5.036,0,8.393-3.357,8.393-8.393s-3.357-8.393-8.393-8.393h-33.574
+                           v-57.915c0-28.538,23.502-51.2,51.2-51.2h57.915v33.574c0,5.036,3.357,8.393,8.393,8.393s8.393-3.357,8.393-8.393v-33.574h58.754
+                           c28.538,0,51.2,23.502,51.2,51.2v57.915h-34.413c-5.036,0-8.393,3.357-8.393,8.393S329.702,259.197,334.738,259.197z
+                           M242.41,49.55v66.958h-57.915c-37.771,0-67.987,31.056-67.987,67.987v57.915H49.55C53.875,138.255,138.255,53.875,242.41,49.55z
+                           M49.55,259.197h66.958v58.754c0,36.931,30.216,67.148,67.987,67.148h57.915v66.958
+                           C138.255,447.731,53.875,363.351,49.55,259.197z M259.197,452.057v-66.958h57.915c37.77,0,67.987-30.216,68.826-67.148v-58.754
+                           h66.119C447.731,363.351,363.351,447.731,259.197,452.057z"""
+            ]
+            []
+        , Svg.path
+            [ SvgAttr.d """M284.377,242.41h-25.18v-25.18c0-5.036-3.357-8.393-8.393-8.393s-8.393,3.357-8.393,8.393v25.18h-25.18
+                           c-5.036,0-8.393,3.357-8.393,8.393s3.357,8.393,8.393,8.393h25.18v25.18c0,5.036,3.357,8.393,8.393,8.393
+                           s8.393-3.357,8.393-8.393v-25.18h25.18c5.036,0,8.393-3.357,8.393-8.393S289.413,242.41,284.377,242.41z"""
+            ]
+            []
+        ]
+        |> Geometry.Svg.at_ scaleFactor
