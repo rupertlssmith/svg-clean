@@ -8,7 +8,7 @@ import Browser.Events
 import Camera2d exposing (Camera2d)
 import Color
 import Css.Global
-import Geometry exposing (BScene, RScene, RScreen, Scene, Screen, VScreen)
+import Geometry exposing (BScene, BScreen, RScreen, Scene, Screen, VScreen)
 import Geometry.Svg
 import GestureEvent exposing (GestureAction(..), GestureEvent(..))
 import Html as H exposing (Html)
@@ -93,7 +93,7 @@ type Model
 
 
 type alias DrawingModel =
-    { frame : RScreen
+    { frame : BScreen
     , zoom : Float
     , fontLevel : Int
     , gestures : Pointer.Model GestureEvent Msg Screen
@@ -240,9 +240,9 @@ update msg model =
             U2.pure model
 
 
-windowSizeToFrame : VScreen -> RScreen
+windowSizeToFrame : VScreen -> BScreen
 windowSizeToFrame size =
-    Rectangle2d.from
+    BoundingBox2d.from
         (Point2d.pixels 0 0)
         (Point2d.xy (Vector2d.xComponent size) (Vector2d.yComponent size))
 
@@ -344,7 +344,7 @@ resetGestureCondition model =
 
 type alias CameraControl a =
     { a
-        | frame : RScreen
+        | frame : BScreen
         , camera : Camera2d Unitless Pixels Scene
         , gestureCondition : GestureCondition
     }
@@ -506,7 +506,7 @@ background { frame } =
             100
 
         ( w, h ) =
-            Rectangle2d.dimensions frame
+            BoundingBox2d.dimensions frame
                 |> Tuple.mapBoth Pixels.toFloat Pixels.toFloat
 
         bgArea =

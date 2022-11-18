@@ -60,14 +60,25 @@ addition of the zoom ratio.
 
 -}
 
+import BoundingBox2d exposing (BoundingBox2d)
 import Frame2d exposing (Frame2d)
 import Point2d exposing (Point2d)
 import Point3d exposing (Point3d)
-import Quantity exposing (Quantity, Rate, Unitless)
+import Quantity exposing (Quantity, Rate)
 import Rectangle2d exposing (Rectangle2d)
 import TypedSvg.Attributes
 import TypedSvg.Core
 import Vector2d exposing (Vector2d)
+
+
+{-| A Camera onto a 2d scene, centered on a particular origin point in the scene
+and with a zoom ratio.
+-}
+type Camera2d units screenUnits coordinates
+    = Camera2d
+        { zoomLevel : Quantity Float (Rate screenUnits units)
+        , sceneFrame : Frame2d units coordinates { defines : coordinates }
+        }
 
 
 {-| ZoomSpace is a mapping of the camera coordinates from (X, Y, Zoom) to
@@ -84,16 +95,6 @@ producing predictable animations of the camera position and zoom level.
 -}
 type ZoomSpace screenUnits coordinates
     = ZoomSpace
-
-
-{-| A Camera onto a 2d scene, centered on a particular origin point in the scene
-and with a zoom ratio.
--}
-type Camera2d units screenUnits coordinates
-    = Camera2d
-        { zoomLevel : Quantity Float (Rate screenUnits units)
-        , sceneFrame : Frame2d units coordinates { defines : coordinates }
-        }
 
 
 {-| Creates a camera centered at the origin point with the given zoom ratio.
@@ -243,7 +244,7 @@ origin point will be shifted by this operation.
 setZoomAtScreenPoint :
     Quantity Float (Rate screenUnits units)
     -> Point2d screenUnits screenCoordinates
-    -> Rectangle2d screenUnits screenCoordinates
+    -> BoundingBox2d screenUnits screenCoordinates
     -> Camera2d units screenUnits coordinates
     -> Camera2d units screenUnits coordinates
 setZoomAtScreenPoint zoomLevel screenPoint screen (Camera2d camera) =
@@ -300,14 +301,15 @@ events will be described by their screen coordinates.
 -}
 pointToScene :
     Camera2d sceneUnits screenUnits sceneCoordinates
-    -> Rectangle2d screenUnits screenCoordinates
+    -> BoundingBox2d screenUnits screenCoordinates
     -> Point2d screenUnits screenCoordinates
     -> Point2d sceneUnits sceneCoordinates
 pointToScene (Camera2d { sceneFrame, zoomLevel }) screen point =
     let
         screenFrame : Frame2d screenUnits screenCoordinates defines
         screenFrame =
-            Rectangle2d.axes screen
+            BoundingBox2d.centerPoint screen
+                |> Frame2d.atPoint
 
         ( transX, transY ) =
             Point2d.coordinatesIn screenFrame point
@@ -323,16 +325,17 @@ the correctly scaled and translated scene space described by that camera.
 -}
 svgViewBox :
     Camera2d sceneUnits screenUnits sceneCoordinates
-    -> Rectangle2d screenUnits screenCoordinates
+    -> BoundingBox2d screenUnits screenCoordinates
     -> TypedSvg.Core.Attribute a
 svgViewBox ((Camera2d { zoomLevel }) as camera) screen =
     let
         ( w, h ) =
-            Rectangle2d.dimensions screen
+            BoundingBox2d.dimensions screen
                 |> Tuple.mapBoth Quantity.unwrap Quantity.unwrap
 
         { x, y } =
-            Rectangle2d.interpolate screen 0 0
+            BoundingBox2d.extrema screen
+                |> (\e -> Point2d.xy e.minX e.minY)
                 |> pointToScene camera screen
                 |> Point2d.unwrap
 
