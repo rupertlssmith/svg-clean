@@ -449,10 +449,9 @@ animateCamera model =
                             zs |> Point3d.toUnitless |> xyzToMovement
                 )
                 |> Point3d.fromUnitless
-                |> Debug.log "zoomSpace"
 
         camera =
-            Camera2d.fromZoomSpace zoomSpace |> Debug.log "camera"
+            Camera2d.fromZoomSpace zoomSpace
 
         zoom =
             Quantity.at_ (Quantity.unsafe 1.0) (Camera2d.zoom camera)
