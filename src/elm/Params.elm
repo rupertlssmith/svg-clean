@@ -62,5 +62,5 @@ view model =
                 ]
             ]
         , H.br [] []
-        , H.div [] [ H.text "Double click the rectangle to zoom it." ]
+        , H.div [] [ H.text "Double click the target to zoom it." ]
         ]

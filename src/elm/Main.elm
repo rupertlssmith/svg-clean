@@ -26,6 +26,7 @@ import Quantity exposing (Unitless)
 import Rectangle2d
 import Style
 import Task
+import Tuple2
 import TypedSvg as Svg
 import TypedSvg.Attributes as SvgAttr
 import TypedSvg.Attributes.InPx as InPx
@@ -279,11 +280,8 @@ updateReady msg drawing =
                 |> U2.andThen (moveCamera args cameraStart)
 
         ( _, OnGestureDoubleTap _ (ItemWithId "testBox" ActionSelect _ _) ) ->
-            let
-                _ =
-                    Debug.log "updateReady" "zoom to target"
-            in
             U2.pure drawing
+                |> U2.andThen zoomTarget
 
         ( _, OnGestureDragEnd _ _ ) ->
             U2.pure drawing
@@ -340,6 +338,50 @@ adjustZoom wheelEvent drawing =
 resetGestureCondition : DrawingModel -> ( DrawingModel, Cmd Msg )
 resetGestureCondition model =
     { model | gestureCondition = NoGesture }
+        |> U2.pure
+
+
+zoomTarget : DrawingModel -> ( DrawingModel, Cmd Msg )
+zoomTarget model =
+    let
+        origin =
+            Camera2d.origin model.camera
+
+        destination =
+            Point2d.origin
+
+        translation =
+            Vector2d.from origin destination
+
+        targetBBox =
+            BoundingBox2d.fromExtrema
+                { minX = Quantity.float -125
+                , minY = Quantity.float -125
+                , maxX = Quantity.float 125
+                , maxY = Quantity.float 125
+                }
+
+        largestTargetDim =
+            BoundingBox2d.dimensions targetBBox
+                |> Tuple2.uncurry Quantity.max
+                |> Quantity.multiplyBy 1.1
+
+        smallestFrameDim =
+            BoundingBox2d.dimensions model.frame
+                |> Tuple2.uncurry Quantity.min
+
+        zoom =
+            Quantity.rate smallestFrameDim largestTargetDim
+
+        newCam =
+            model.camera
+                |> Camera2d.translateBy translation
+                |> Camera2d.setZoom zoom
+    in
+    { model
+        | camera = newCam
+        , zoom = Quantity.unwrap zoom
+    }
         |> U2.pure
 
 
@@ -531,7 +573,7 @@ background { frame } =
 
 
 testBox : DrawingModel -> Svg msg
-testBox model =
+testBox _ =
     let
         scaleFactor =
             Quantity.per (Quantity.float 1) (Quantity.float 2)
@@ -575,4 +617,5 @@ testBox model =
             ]
             []
         ]
+        |> Geometry.Svg.translateBy (Vector2d.unitless -251 -251)
         |> Geometry.Svg.at_ scaleFactor
