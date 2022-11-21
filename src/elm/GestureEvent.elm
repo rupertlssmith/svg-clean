@@ -10,6 +10,7 @@ import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra as DE
 import Pixels
 import Point2d
+import Pointer exposing (EventKind(..))
 
 
 
@@ -30,8 +31,8 @@ type GestureAction
 -- Codecs
 
 
-gestureDecoder : String -> Decoder GestureEvent
-gestureDecoder rootId =
+gestureDecoder : String -> EventKind -> Decoder GestureEvent
+gestureDecoder rootId _ =
     keyDecoder
         |> Decode.andThen
             (\ctrlKey ->

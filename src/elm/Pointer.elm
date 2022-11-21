@@ -1,13 +1,15 @@
 module Pointer exposing
-    ( defaultConfig
+    ( Config
     , Model, Msg, init, update
     , PointerPorts, subscriptions
     , on
     , DragArgs, PointArgs, ScaleArgs
+    , EventKind(..)
     , apply, empty
-    , onClick, onClickAndHold, onDoubleClick, onDrag, onDragStart
+    , onClick, onDoubleClick, onDrag, onDragStart
     , onWheel, onPinch
-    , onMove, onPointerDown, onPointerUp
+    , onMove, onPointerUp
+    , Handlers
     )
 
 {-| Pointer is a high-level pointer API that unifies pointer events over all
@@ -20,7 +22,7 @@ events with `Pixels` for units.
 
 # Configurable parameters.
 
-@docs Config, defaultConfig
+@docs Config
 
 
 # The TEA structure for hooking up the internal state into your application.
@@ -45,10 +47,11 @@ events with `Pixels` for units.
 
 # A DSL for defining use gesture handling behaviour.
 
+@docs EventKind
 @docs apply, empty
-@docs onClick, onClickAndHold, onDoubleClick, onDrag, onDragStart
+@docs onClick, onDoubleClick, onDrag, onDragStart
 @docs onWheel, onPinch
-@docs onMove, onPointerDown, onPointerUp
+@docs onMove, onPointerUp
 
 -}
 
@@ -56,7 +59,7 @@ import Browser.Events
 import Dict exposing (Dict)
 import Html
 import Html.Events
-import Json.Decode as Decode exposing (Decoder, Value)
+import Json.Decode as Decode exposing (Decoder, Value, bool)
 import Json.Decode.Extra as DE
 import Maybe.Extra
 import Pixels exposing (Pixels)
@@ -120,9 +123,9 @@ type alias ButtonHandler a msg coordinates =
     { click : Maybe (PointArgs coordinates -> a -> msg)
     , doubleClick : Maybe (PointArgs coordinates -> a -> msg)
     , clickAndHold : Maybe (PointArgs coordinates -> a -> msg)
-    , drag : Maybe (DragArgs coordinates -> a -> msg)
+    , drag : Maybe (DragArgs coordinates -> a -> a -> msg)
     , dragStart : Maybe (DragArgs coordinates -> a -> msg)
-    , dragEnd : Maybe (DragArgs coordinates -> a -> msg)
+    , dragEnd : Maybe (DragArgs coordinates -> a -> a -> msg)
     , move : Maybe (PointArgs coordinates -> a -> msg)
     , pointerUp : Maybe (PointArgs coordinates -> a -> msg)
     , pointerDown : Maybe (PointArgs coordinates -> a -> msg)
@@ -138,6 +141,7 @@ type alias PointArgs coordinates =
 type alias DragArgs coordinates =
     { startPos : Point2d Pixels coordinates
     , pos : Point2d Pixels coordinates
+    , isFirstEvent : Bool
     }
 
 
@@ -152,18 +156,35 @@ type alias ScaleArgs coordinates =
 
 
 type Msg a coordinates
-    = PointerUp a (PointerEvent coordinates)
-    | PointerDown a (PointerEvent coordinates)
-    | PointerClick a (PointerEvent coordinates)
-    | PointerMove a (PointerEvent coordinates)
-    | PointerCancel
-    | MouseWheel a (WheelEvent coordinates)
+    = PointerUpEvent a (PointerEvent coordinates)
+    | PointerDownEvent a (PointerEvent coordinates)
+    | PointerClickEvent a (MouseEvent coordinates)
+    | PointerMoveEvent a (PointerEvent coordinates)
+    | PointerLeaveEvent a (PointerEvent coordinates)
+    | PointerCancelEvent
+    | MouseWheelEvent a (WheelEvent coordinates)
     | Error Decode.Error
+
+
+type EventKind
+    = UpEvent
+    | DownEvent
+    | ClickEvent
+    | MoveEvent
+    | ScrollWheelEvent
 
 
 type alias PointerEvent coordinates =
     { pointerId : Int
     , button : Int
+    , pos : Point2d Pixels coordinates
+    , times : Int
+    , isLeave : Bool
+    }
+
+
+type alias MouseEvent coordinates =
+    { button : Int
     , pos : Point2d Pixels coordinates
     , times : Int
     }
@@ -199,32 +220,37 @@ init maybeConfig toMsg =
 update : Msg a coordinates -> Model a msg coordinates -> ( Model a msg coordinates, Cmd msg )
 update msg model =
     case msg of
-        PointerDown val args ->
+        PointerDownEvent val args ->
             U2.pure model
                 |> U2.andThen (initPointerState val args)
                 |> U2.andThen (notifyPointerDown val args)
 
-        PointerUp val args ->
+        PointerUpEvent val args ->
             U2.pure model
                 |> U2.andThen (checkForDragEnd val args)
                 |> U2.andThen (notifyPointerUp val args)
                 |> U2.andThen (clearPointerState val args)
 
-        PointerClick val args ->
+        PointerClickEvent val args ->
             U2.pure model
                 |> U2.andThen (checkForClickOrDouble val args)
 
-        PointerMove val args ->
+        PointerMoveEvent val args ->
             U2.pure model
                 |> U2.andThen (notifyPointerMove val args)
                 |> U2.andThen (checkForMovementGesture val args)
                 |> U2.andThen (recordLastPointerPos args)
 
-        PointerCancel ->
+        PointerLeaveEvent val args ->
+            U2.pure model
+                |> U2.andThen (checkForDrag val args)
+                |> U2.andThen (recordLastPointerPos args)
+
+        PointerCancelEvent ->
             U2.pure model
                 |> U2.andThen clearAllPointerState
 
-        MouseWheel val args ->
+        MouseWheelEvent val args ->
             U2.pure model
                 |> U2.andThen (scaleWheel val args)
 
@@ -244,8 +270,8 @@ type alias PointerPorts msg =
     }
 
 
-subscriptions : PointerPorts msg -> Model a msg coordinates -> Decoder a -> Sub msg
-subscriptions ports (Model model) decoder =
+subscriptions : PointerPorts msg -> Model a msg coordinates -> (EventKind -> Decoder a) -> Sub msg
+subscriptions ports (Model model) decoderFn =
     let
         portDecoder eventDecoder val =
             case Decode.decodeValue eventDecoder val of
@@ -258,7 +284,7 @@ subscriptions ports (Model model) decoder =
         down =
             if atLeastOnePointerDownHandler (Model model) then
                 ports.onPointerDown
-                    (withPointerEvent decoder PointerDown |> portDecoder)
+                    (withPointerEvent (decoderFn DownEvent) PointerDownEvent |> portDecoder)
 
             else
                 Sub.none
@@ -266,7 +292,7 @@ subscriptions ports (Model model) decoder =
         up =
             if atLeastOnePointerUpHandler (Model model) then
                 ports.onPointerUp
-                    (withPointerEvent decoder PointerUp |> portDecoder)
+                    (withPointerEvent (decoderFn UpEvent) PointerUpEvent |> portDecoder)
 
             else
                 Sub.none
@@ -278,7 +304,7 @@ subscriptions ports (Model model) decoder =
                     || Maybe.Extra.isJust model.pinchHandler
             then
                 ports.onPointerMove
-                    (withPointerEvent decoder PointerMove |> portDecoder)
+                    (withPointerEvent (decoderFn MoveEvent) PointerMoveEvent |> portDecoder)
 
             else
                 Sub.none
@@ -286,13 +312,13 @@ subscriptions ports (Model model) decoder =
         click =
             if atLeastOneClickHandler (Model model) then
                 Browser.Events.onClick
-                    (withPointerEvent decoder PointerClick |> Decode.map model.toMsg)
+                    (withMouseEvent (decoderFn ClickEvent) PointerClickEvent |> Decode.map model.toMsg)
 
             else
                 Sub.none
 
         cancel =
-            ports.onPointerCancel (always PointerCancel >> model.toMsg)
+            ports.onPointerCancel (always PointerCancelEvent >> model.toMsg)
     in
     [ down
     , up
@@ -307,8 +333,8 @@ subscriptions ports (Model model) decoder =
 -- Event handlers for adding to the view, for listening to pointer events below the Document level.
 
 
-on : Model a msg coordinates -> Decoder a -> List (Html.Attribute msg)
-on (Model model) decoder =
+on : Model a msg coordinates -> (EventKind -> Decoder a) -> List (Html.Attribute msg)
+on (Model model) decoderFn =
     let
         down =
             if
@@ -316,7 +342,7 @@ on (Model model) decoder =
                     || Maybe.Extra.isJust model.pinchHandler
             then
                 Html.Events.on "pointerdown"
-                    (withPointerEvent decoder PointerDown |> Decode.map model.toMsg)
+                    (withPointerEvent (decoderFn DownEvent) PointerDownEvent |> Decode.map model.toMsg)
                     |> Just
 
             else
@@ -328,7 +354,7 @@ on (Model model) decoder =
                     || Maybe.Extra.isJust model.pinchHandler
             then
                 Html.Events.on "pointerup"
-                    (withPointerEvent decoder PointerUp |> Decode.map model.toMsg)
+                    (withPointerEvent (decoderFn UpEvent) PointerUpEvent |> Decode.map model.toMsg)
                     |> Just
 
             else
@@ -340,7 +366,16 @@ on (Model model) decoder =
                     || Maybe.Extra.isJust model.pinchHandler
             then
                 Html.Events.on "pointermove"
-                    (withPointerEvent decoder PointerMove |> Decode.map model.toMsg)
+                    (withPointerEvent (decoderFn MoveEvent) PointerMoveEvent |> Decode.map model.toMsg)
+                    |> Just
+
+            else
+                Nothing
+
+        out =
+            if atLeastOneDragStartHandler (Model model) then
+                Html.Events.on "pointerleave"
+                    (withLeaveEvent (decoderFn UpEvent) PointerLeaveEvent |> Decode.map model.toMsg)
                     |> Just
 
             else
@@ -349,7 +384,7 @@ on (Model model) decoder =
         click =
             if atLeastOneClickHandler (Model model) then
                 Html.Events.on "click"
-                    (withPointerEvent decoder PointerClick |> Decode.map model.toMsg)
+                    (withMouseEvent (decoderFn ClickEvent) PointerClickEvent |> Decode.map model.toMsg)
                     |> Just
 
             else
@@ -360,16 +395,17 @@ on (Model model) decoder =
                 |> Maybe.map
                     (\_ ->
                         Html.Events.on "wheel"
-                            (withWheel decoder MouseWheel |> Decode.map model.toMsg)
+                            (withWheel (decoderFn ScrollWheelEvent) MouseWheelEvent |> Decode.map model.toMsg)
                     )
 
         cancel =
-            Html.Events.on "pointercancel" (Decode.succeed PointerCancel |> Decode.map model.toMsg)
+            Html.Events.on "pointercancel" (Decode.succeed PointerCancelEvent |> Decode.map model.toMsg)
                 |> Just
     in
     [ down
     , up
     , move
+    , out
     , click
     , wheel
     , cancel
@@ -421,7 +457,7 @@ initPointerState value args (Model model) =
                 ( 2, 2 ) ->
                     { state | pointers = pointers, gesture = TwoPointer }
 
-                ( _, _ ) ->
+                _ ->
                     { state | pointers = Dict.empty, gesture = NoPointer }
     in
     { model | state = newState }
@@ -460,7 +496,7 @@ clearPointerState value args (Model model) =
                 ( 2, 2 ) ->
                     { state | pointers = pointers, gesture = TwoPointer }
 
-                ( _, _ ) ->
+                _ ->
                     { state | pointers = Dict.empty, gesture = NoPointer }
     in
     { model | state = newState }
@@ -480,8 +516,9 @@ checkForDragEnd val args (Model model) =
                     case ( dragEnd, pointerState.dragging ) of
                         ( Just dragEndHandler, True ) ->
                             dragEndHandler
-                                { startPos = pointerState.startPos, pos = args.pos }
+                                { startPos = pointerState.startPos, pos = args.pos, isFirstEvent = False }
                                 pointerState.initialValue
+                                val
                                 |> Task.Extra.message
 
                         _ ->
@@ -588,7 +625,15 @@ checkForDrag val pointerEvent (Model model) =
                         , addDragMsgIfHandlerExists False pointerState.button pointerState msgs
                         )
 
-                    else if (distance pointerState.startPos pointerEvent.pos |> floor) > model.config.dragThreshold then
+                    else if
+                        (distance pointerState.startPos pointerEvent.pos |> floor)
+                            > model.config.dragThreshold
+                    then
+                        ( Dict.insert pointerId { pointerState | dragging = True } stateAccum
+                        , addDragMsgIfHandlerExists True pointerState.button pointerState msgs
+                        )
+
+                    else if pointerEvent.isLeave then
                         ( Dict.insert pointerId { pointerState | dragging = True } stateAccum
                         , addDragMsgIfHandlerExists True pointerState.button pointerState msgs
                         )
@@ -611,22 +656,33 @@ checkForDrag val pointerEvent (Model model) =
 
                         Just dragHandler ->
                             dragHandler
-                                { startPos = pointerState.startPos, pos = pointerEvent.pos }
+                                { startPos = pointerState.startPos
+                                , pos = pointerEvent.pos
+                                , isFirstEvent = isStart
+                                }
                                 pointerState.initialValue
+                                val
                                 :: msgs
 
                 ( True, Just { drag, dragStart } ) ->
                     ([ Maybe.map
                         (\dragHandler ->
                             dragHandler
-                                { startPos = pointerState.startPos, pos = pointerEvent.pos }
+                                { startPos = pointerState.startPos
+                                , pos = pointerEvent.pos
+                                , isFirstEvent = isStart
+                                }
                                 pointerState.initialValue
+                                val
                         )
                         drag
                      , Maybe.map
                         (\dragStartHandler ->
                             dragStartHandler
-                                { startPos = pointerState.startPos, pos = pointerEvent.pos }
+                                { startPos = pointerState.startPos
+                                , pos = pointerEvent.pos
+                                , isFirstEvent = isStart
+                                }
                                 pointerState.initialValue
                         )
                         dragStart
@@ -736,7 +792,16 @@ clearAllPointerState (Model model) =
         |> U2.pure
 
 
-checkForClickOrDouble : a -> PointerEvent coordinates -> Model a msg coordinates -> ( Model a msg coordinates, Cmd msg )
+checkForClickOrDouble :
+    a
+    ->
+        { b
+            | button : Int
+            , pos : Point2d Pixels coordinates
+            , times : Int
+        }
+    -> Model a msg coordinates
+    -> ( Model a msg coordinates, Cmd msg )
 checkForClickOrDouble value args (Model model) =
     let
         clickCmd =
@@ -892,7 +957,11 @@ onClickAndHold button spec (Handlers handlers) =
 
 onDrag :
     Int
-    -> { h | drag : DragArgs coordinates -> a -> msg, dragEnd : DragArgs coordinates -> a -> msg }
+    ->
+        { h
+            | drag : DragArgs coordinates -> a -> a -> msg
+            , dragEnd : DragArgs coordinates -> a -> a -> msg
+        }
     -> Handlers a msg coordinates
     -> Handlers a msg coordinates
 onDrag button spec (Handlers handlers) =
@@ -1027,6 +1096,20 @@ withPointerEvent decoder cons =
         |> DE.andMap pointerEventDecoder
 
 
+withLeaveEvent : Decoder a -> (a -> PointerEvent coordinates -> Msg a coordinates) -> Decoder (Msg a coordinates)
+withLeaveEvent decoder cons =
+    Decode.succeed cons
+        |> DE.andMap decoder
+        |> DE.andMap leaveEventDecoder
+
+
+withMouseEvent : Decoder a -> (a -> MouseEvent coordinates -> Msg a coordinates) -> Decoder (Msg a coordinates)
+withMouseEvent decoder cons =
+    Decode.succeed cons
+        |> DE.andMap decoder
+        |> DE.andMap mouseEventDecoder
+
+
 withWheel : Decoder a -> (a -> WheelEvent coordinates -> Msg a coordinates) -> Decoder (Msg a coordinates)
 withWheel decoder cons =
     Decode.succeed cons
@@ -1042,6 +1125,25 @@ pointerEventDecoder : Decoder (PointerEvent coordinates)
 pointerEventDecoder =
     Decode.succeed PointerEvent
         |> DE.andMap (Decode.field "pointerId" Decode.int)
+        |> DE.andMap (Decode.field "button" Decode.int)
+        |> DE.andMap clientPosDecoder
+        |> DE.andMap (Decode.field "detail" Decode.int)
+        |> DE.andMap (Decode.succeed False)
+
+
+leaveEventDecoder : Decoder (PointerEvent coordinates)
+leaveEventDecoder =
+    Decode.succeed PointerEvent
+        |> DE.andMap (Decode.field "pointerId" Decode.int)
+        |> DE.andMap (Decode.field "button" Decode.int)
+        |> DE.andMap clientPosDecoder
+        |> DE.andMap (Decode.field "detail" Decode.int)
+        |> DE.andMap (Decode.succeed True)
+
+
+mouseEventDecoder : Decoder (MouseEvent coordinates)
+mouseEventDecoder =
+    Decode.succeed MouseEvent
         |> DE.andMap (Decode.field "button" Decode.int)
         |> DE.andMap clientPosDecoder
         |> DE.andMap (Decode.field "detail" Decode.int)
@@ -1124,6 +1226,11 @@ atLeastOnePointerUpHandler (Model model) =
 atLeastOneClickHandler : Model a msg coordinates -> Bool
 atLeastOneClickHandler (Model model) =
     handlerCheck model .click
+
+
+atLeastOneDragStartHandler : Model a msg coordinates -> Bool
+atLeastOneDragStartHandler (Model model) =
+    handlerCheck model .dragStart
 
 
 handlerCheck : { m | buttonHandlers : Dict Int (ButtonHandler a msg coordinates) } -> (ButtonHandler a msg coordinates -> Maybe b) -> Bool

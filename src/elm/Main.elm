@@ -125,8 +125,8 @@ type Msg
     = WindowSize VScreen
     | OnGestureMsg (Pointer.Msg GestureEvent Screen)
     | OnDivGestureMsg (Pointer.Msg GestureEvent Screen)
-    | OnGestureDrag (Pointer.DragArgs Screen) GestureEvent
-    | OnGestureDragEnd (Pointer.DragArgs Screen) GestureEvent
+    | OnGestureDrag (Pointer.DragArgs Screen) GestureEvent GestureEvent
+    | OnGestureDragEnd (Pointer.DragArgs Screen) GestureEvent GestureEvent
     | OnGestureTap (Pointer.PointArgs Screen) GestureEvent
     | OnGestureDoubleTap (Pointer.PointArgs Screen) GestureEvent
     | OnGestureZoom (Pointer.ScaleArgs Screen) GestureEvent
@@ -303,11 +303,11 @@ updateReady msg drawing =
             U2.pure drawing
                 |> U2.andThen (adjustZoom args)
 
-        ( NoGesture, OnGestureDrag args (Root _) ) ->
+        ( NoGesture, OnGestureDrag args (Root _) _ ) ->
             U2.pure drawing
                 |> U2.andThen (moveCamera args drawing.camera)
 
-        ( MovingCamera cameraStart, OnGestureDrag args (Root _) ) ->
+        ( MovingCamera cameraStart, OnGestureDrag args (Root _) _ ) ->
             U2.pure drawing
                 |> U2.andThen (moveCamera args cameraStart)
 
@@ -315,7 +315,7 @@ updateReady msg drawing =
             U2.pure drawing
                 |> U2.andThen animateZoomToTarget
 
-        ( _, OnGestureDragEnd _ _ ) ->
+        ( _, OnGestureDragEnd _ _ _ ) ->
             U2.pure drawing
                 |> U2.andThen resetGestureCondition
 
