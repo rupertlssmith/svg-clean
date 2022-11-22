@@ -27,6 +27,7 @@
             "pablohirafuji/elm-markdown": "2.0.5",
             "rtfeldman/elm-css": "16.1.1",
             "the-sett/elm-2d-camera": "1.0.0",
+            "the-sett/elm-pointer": "1.0.0",
             "the-sett/elm-update-helper": "2.2.0"
         },
         "indirect": {
